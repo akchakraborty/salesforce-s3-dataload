@@ -2,4 +2,13 @@
 
 <mule xmlns="http://www.mulesoft.org/schema/mule/core" xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
 	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-	xsi:schemaLocation="http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd"></mule>
+	xsi:schemaLocation="http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd">
+	<flow name="salesforce-amazonFlow" doc:id="4443ea33-d45e-4316-b5b9-0967a30874ec" >
+		<scheduler doc:name="Scheduler" doc:id="fd947f99-ac16-4be9-8e11-7e8bec01871e" >
+			<scheduling-strategy >
+				<fixed-frequency frequency="10" timeUnit="MINUTES"/>
+			</scheduling-strategy>
+		</scheduler>
+		<logger level="INFO" doc:name="Logger" doc:id="4076746d-8786-4f0f-987d-b82f1d235e4d" message="This is SFDC Data load project"/>
+	</flow>
+</mule>

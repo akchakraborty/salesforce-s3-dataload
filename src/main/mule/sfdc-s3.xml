@@ -1,0 +1,275 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<mule xmlns:os="http://www.mulesoft.org/schema/mule/os" xmlns:db="http://www.mulesoft.org/schema/mule/db"
+	xmlns:file="http://www.mulesoft.org/schema/mule/file"
+	xmlns:http="http://www.mulesoft.org/schema/mule/http" xmlns:batch="http://www.mulesoft.org/schema/mule/batch" xmlns:s3="http://www.mulesoft.org/schema/mule/s3" xmlns:salesforce="http://www.mulesoft.org/schema/mule/salesforce" xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core" xmlns="http://www.mulesoft.org/schema/mule/core" xmlns:doc="http://www.mulesoft.org/schema/mule/documentation" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd
+http://www.mulesoft.org/schema/mule/salesforce http://www.mulesoft.org/schema/mule/salesforce/current/mule-salesforce.xsd
+http://www.mulesoft.org/schema/mule/s3 http://www.mulesoft.org/schema/mule/s3/current/mule-s3.xsd
+http://www.mulesoft.org/schema/mule/batch http://www.mulesoft.org/schema/mule/batch/current/mule-batch.xsd
+http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd
+http://www.mulesoft.org/schema/mule/file http://www.mulesoft.org/schema/mule/file/current/mule-file.xsd
+http://www.mulesoft.org/schema/mule/db http://www.mulesoft.org/schema/mule/db/current/mule-db.xsd
+http://www.mulesoft.org/schema/mule/os http://www.mulesoft.org/schema/mule/os/current/mule-os.xsd">
+
+	<salesforce:sfdc-config name="Salesforce_Config" doc:name="Salesforce Config" doc:id="0aa724af-4f65-4212-9380-a86f9de75e18" >
+		<salesforce:basic-connection username="${sf.username}" password="${sf.password}" url="${sf.authorizationURL}" securityToken="${sf.securitytoken}"/>
+	</salesforce:sfdc-config>
+	<http:listener-config name="HTTP_Listener_config" doc:name="HTTP Listener config" doc:id="27e6fd4a-715a-4b8c-9000-e6f2d8aaecbe" >
+		<http:listener-connection host="0.0.0.0" port="8081" />
+	</http:listener-config>
+	<configuration-properties doc:name="Configuration properties" doc:id="47d5d9f7-e708-4504-bfb3-cee9fdc29e02" file="salesforce-object-to-s3-bucket-${env}.properties" />
+	<global-property doc:name="Global Property" doc:id="785eda6c-826b-4d2b-9839-cb080ccbf853" name="env" value="dev" />
+	<db:config name="Database_Config" doc:name="Database Config" doc:id="e04d4fcf-5661-4a07-9965-e1966bc7a7bf" >
+		<db:my-sql-connection host="localhost" port="3306" user="user" password="pass" database="employee" />
+	</db:config>
+	<os:object-store name="watermark" doc:name="Object store" doc:id="3cb72b13-49da-462d-87a0-afe70292c9a7" />
+	<flow name="Case" doc:id="567c2630-b523-4ff6-8bdb-d2ea48c717f1" >
+		<http:listener doc:name="Listener" doc:id="2a0db09f-933b-45fa-bd4e-9f0c72262690" path="/hello" config-ref="HTTP_Listener_config"/>
+		<set-variable value="${total.objects}" doc:name="Set Variable" doc:id="64cb481f-68cb-4424-905c-c67cdabb72c0" variableName="objects"/>
+		<foreach doc:name="For Each" doc:id="c6b0d0c2-2392-47b6-8f3d-1dd638d39d7b" collection="#[(vars.objects splitBy ',')]">
+			<set-variable value="#[payload]" doc:name="jobName" doc:id="88128f48-f47b-470b-8ca0-265751c54872" variableName="jobName"/>
+			<ee:transform doc:name="Transform Message" doc:id="71f46e2a-1063-4242-aaa5-dbc4dff5c67a" >
+				<ee:message >
+					<ee:set-payload ><![CDATA[%dw 2.0
+output application/java
+---
+readUrl("classpath://config/config-properties/$(vars.jobName).properties","application/properties")
+]]></ee:set-payload>
+				</ee:message>
+			</ee:transform>
+			
+			<ee:transform doc:name="Transform Message" doc:id="ea695e1a-5add-4fd7-a8a2-2cadf21af59f" >
+				<ee:message >
+				</ee:message>
+				<ee:variables >
+					<ee:set-variable variableName="delta" ><![CDATA[%dw 2.0
+output application/java
+---
+vars.intQuery."select.query.delta.records"]]></ee:set-variable>
+					<ee:set-variable variableName="full" ><![CDATA[%dw 2.0
+output application/java
+---
+vars.intQuery."select.query.full.load"]]></ee:set-variable>
+				</ee:variables>
+			</ee:transform>
+			
+			<choice doc:name="Choice" doc:id="bc2652cc-17df-4b23-81c3-e99ad3b78a03" >
+			<when expression="#[vars.lastrundatetime != '']">
+				<salesforce:query-all doc:name="Delta Records" doc:id="c3bd55e5-c9de-4f18-9942-79385ee2b7bb" config-ref="Salesforce_Config">
+					<salesforce:salesforce-query ><![CDATA[#[vars.delta]
+
+]]></salesforce:salesforce-query>
+					<salesforce:parameters ><![CDATA[#[output application/java
+---
+{
+	datefilter : payload
+}]]]></salesforce:parameters>
+		</salesforce:query-all>
+			</when>
+			<otherwise >
+				<salesforce:query-all doc:name="Full Load Historical Data" doc:id="3804454a-c0ef-4c9b-ba20-ee17873b0a12" config-ref="Salesforce_Config">
+					<salesforce:salesforce-query ><![CDATA[#[vars.full ++ " limit 100"]]]></salesforce:salesforce-query>
+				</salesforce:query-all>
+			</otherwise>
+		</choice>
+			<flow-ref doc:name="Flow Reference" doc:id="355a710f-ca90-439b-b130-df8284b88bfe" name="sfdc-s3-choice-impl" />
+		</foreach>
+		<ee:transform doc:name="Transform Message" doc:id="0253ff17-821d-4b17-90bc-6d216bf3e9bb">
+			<ee:message>
+				<ee:set-payload><![CDATA[%dw 2.0
+output application/csv separator = "|"
+var temp = write(payload, 'application/json')
+var temp2 = temp replace '\"' with ("")
+var repl = read((temp2 replace "|" with ""), 'applcation/json')
+var headers = (repl[0] pluck $$) orderBy $
+---
+repl map (payload01,index) -> {
+(headers map {
+	($):payload01."$($)" 
+	}) 
+}]]></ee:set-payload>
+			</ee:message>
+		</ee:transform>
+
+	</flow>
+	<sub-flow name="sfdc-s3-choice-impl" doc:id="ca0ee42a-3a13-4b16-bc0d-fd68029ef7ad" >
+		<choice doc:name="Choice" doc:id="0d934ef5-9a68-4fe6-bde5-e5e8412134d8" >
+			<when expression="#[vars.jobName == 'sf-account']">
+					<ee:transform doc:name="Transform Message" doc:id="98c48e12-8a5c-4640-916a-4faafa6e8ef8">
+				<ee:message>
+							<ee:set-payload resource="dwlFiles/account.dwl" />
+				</ee:message>
+			</ee:transform>
+				</when>
+			<when expression="#[vars.jobName == 'sf-account']">
+				<ee:transform doc:name="Transform Message" doc:id="27971ad2-0df3-4fd9-85b9-182256444442">
+			<ee:message>
+						<ee:set-payload resource="dwlFiles/accountContact.dwl" />
+			</ee:message>
+		</ee:transform>
+			</when>
+			<when expression="#[vars.jobName == 'sf-account']">
+				<ee:transform doc:name="Transform Message" doc:id="b5641b7f-b844-436a-850f-438b837c55ef">
+			<ee:message>
+						<ee:set-payload resource="dwlFiles/accountTeam.dwl" />
+			</ee:message>
+		</ee:transform>
+			</when>
+			<when expression="#[vars.jobName == 'sf-account']">
+				<ee:transform doc:name="Transform Message" doc:id="d06d2d8b-ddb5-4b5b-b619-e2fb535c3832">
+			<ee:message>
+						<ee:set-payload resource="dwlFiles/cardShip.dwl" />
+			</ee:message>
+		</ee:transform>
+			</when>
+			<when expression="#[vars.jobName == 'sf-account']">
+				<ee:transform doc:name="Transform Message" doc:id="7a7f50c1-8ef8-47f2-adec-d4746f29e32e">
+			<ee:message>
+						<ee:set-payload resource="dwlFiles/case.dwl" />
+			</ee:message>
+		</ee:transform>
+			</when>
+			<when expression="#[vars.jobName == 'sf-account']">
+				<ee:transform doc:name="Transform Message" doc:id="7dc2c17a-7d3c-42d3-8f50-4e8ceb7a3237">
+			<ee:message>
+						<ee:set-payload resource="dwlFiles/contact.dwl" />
+			</ee:message>
+		</ee:transform>
+			</when>
+			<when expression="#[vars.jobName == 'sf-account']">
+				<ee:transform doc:name="Transform Message" doc:id="4b2eae1c-6e5e-40b1-baea-540411ff3af7">
+			<ee:message>
+						<ee:set-payload resource="dwlFiles/contract.dwl" />
+			</ee:message>
+		</ee:transform>
+			</when>
+			<when expression="#[vars.jobName == 'sf-account']">
+				<ee:transform doc:name="Transform Message" doc:id="427a9f33-1a61-4165-9b28-991c4364f925">
+			<ee:message>
+						<ee:set-payload resource="dwlFiles/creditApp.dwl" />
+			</ee:message>
+		</ee:transform>
+			</when>
+			<when expression="#[vars.jobName == 'sf-account']">
+				<ee:transform doc:name="Transform Message" doc:id="d173a1ef-942d-4ef5-899a-c3700b6697de">
+			<ee:message>
+						<ee:set-payload resource="dwlFiles/event.dwl" />
+			</ee:message>
+		</ee:transform>
+			</when>
+			<when expression="#[vars.jobName == 'sf-account']">
+				<ee:transform doc:name="Transform Message" doc:id="a7bfd822-513c-421b-8a65-1cc7ffcc862a">
+			<ee:message>
+						<ee:set-payload resource="dwlFiles/lead.dwl" />
+			</ee:message>
+		</ee:transform>
+			</when>
+			<when expression="#[vars.jobName == 'Account']">
+				<ee:transform doc:name="Transform Message" doc:id="9a0c768f-0dbf-402a-9f32-95728b860938" >
+					<ee:message >
+						<ee:set-payload resource="dwlFiles/note.dwl" />
+					</ee:message>
+				</ee:transform>
+			</when>
+			<when expression="#[vars.jobName == 'Account']">
+				<ee:transform doc:name="Transform Message" doc:id="711ff5ea-9c13-43f4-b77e-ae7e89076f22" >
+					<ee:message >
+						<ee:set-payload resource="dwlFiles/oppContact.dwl" />
+					</ee:message>
+				</ee:transform>
+			</when>
+			<when expression="#[vars.jobName == 'Account']">
+				<ee:transform doc:name="Transform Message" doc:id="583dff37-9401-4097-bf1d-68a8616aa82a" >
+					<ee:message >
+						<ee:set-payload resource="dwlFiles/opportunity.dwl" />
+					</ee:message>
+				</ee:transform>
+			</when>
+			<when expression="#[vars.jobName == 'Account']">
+				<ee:transform doc:name="Transform Message" doc:id="6e99504f-03f0-4e92-94a5-7c9e9fde5ec6" >
+					<ee:message >
+						<ee:set-payload resource="dwlFiles/oppTeam.dwl" />
+					</ee:message>
+				</ee:transform>
+			</when>
+			<when expression="#[vars.jobName == 'Account']">
+				<ee:transform doc:name="Transform Message" doc:id="c0a755a8-c7b4-4c58-abb0-257ef9e4cf19" >
+					<ee:message >
+						<ee:set-payload resource="dwlFiles/postCallSurvey.dwl" />
+					</ee:message>
+				</ee:transform>
+			</when>
+			<when expression="#[vars.jobName == 'Account']">
+				<ee:transform doc:name="Transform Message" doc:id="712decf3-dc16-45ce-b16c-5973d49ca6ec" >
+					<ee:message >
+						<ee:set-payload resource="dwlFiles/recordType.dwl" />
+					</ee:message>
+				</ee:transform>
+			</when>
+			<when expression="#[vars.jobName == 'Account']">
+				<ee:transform doc:name="Transform Message" doc:id="ccb7ad03-e6f7-479e-9552-459c3a1e41be" >
+					<ee:message >
+						<ee:set-payload resource="dwlFiles/task.dwl" />
+					</ee:message>
+				</ee:transform>
+			</when>
+			<when expression="#[vars.jobName == 'Account']">
+				<ee:transform doc:name="Transform Message" doc:id="65fa6555-f74a-4a45-8a35-4eb5c88b8f72" >
+					<ee:message >
+						<ee:set-payload resource="dwlFiles/user.dwl" />
+					</ee:message>
+				</ee:transform>
+			</when>
+			<when expression="#[vars.jobName == 'Account']">
+				<ee:transform doc:name="Transform Message" doc:id="b97a80dd-4714-4284-84fe-1f6747977a06" >
+					<ee:message >
+						<ee:set-payload resource="dwlFiles/userRole.dwl" />
+					</ee:message>
+				</ee:transform>
+			</when>
+			<when expression="#[vars.jobName == 'Account']">
+				<ee:transform doc:name="Transform Message" doc:id="ce530710-5ebd-4f94-ac57-dcc57c98b095" >
+					<ee:message >
+						<ee:set-payload resource="dwlFiles/waiver.dwl" />
+					</ee:message>
+				</ee:transform>
+			</when>
+			<otherwise >
+				<logger level="INFO" doc:name="Logger" doc:id="f9a59b87-3683-4357-80de-847412e40fae" />
+			</otherwise>
+		</choice>
+	</sub-flow>
+	<flow name="watermark-impl" doc:id="e611f7c3-e68c-4123-b163-50f92178e0f9" >
+		<os:retrieve doc:id="3b43111a-ebe5-4d14-991b-f902c0508579" key="watermark" objectStore="watermark" target="watermarkValue">
+			<os:default-value ><![CDATA[2020-11-27T09:00:00:000Z]]></os:default-value>
+		</os:retrieve>
+		<db:select doc:name="Select" doc:id="d9329a49-d8e3-4b25-9b6a-8640ea79817a" config-ref="Database_Config">
+			<db:sql ><![CDATA[select id, name, city, phone, lastmodifieddate from acccount where lastmodifieddate > :lastmoddate
+
+]]></db:sql>
+			<db:input-parameters ><![CDATA[#[{'lastmoddate':vars.watermarkValue}]]]></db:input-parameters>
+		</db:select>
+		<flow-ref doc:name="Flow Reference" doc:id="b990b043-cd27-487f-ac7a-fe31a85177b3" name="sfdc-s3-choice-impl"/>
+		<os:store doc:name="Store" doc:id="4c7f3380-6fda-4fed-ac21-9b77a7ed48ec" key="watermark" failOnNullValue="false" objectStore="watermark">
+			<os:value ><![CDATA[#[max(payload map $.lastmodifieddate)]]]></os:value>
+		</os:store>
+	</flow>
+	<flow name="sfdc-s3Flow" doc:id="c949a99a-e384-4f5d-ad6d-049b9e1c9601" >
+		<ee:transform doc:name="Transform Message" doc:id="5f241ada-f42c-4615-a40b-481aa0930cc7" >
+			<ee:message >
+				<ee:set-payload ><![CDATA[%dw 2.0
+output application/java
+---
+payload map (payload01, index) ->{
+	id: payload01.dbID,
+	Name: payload01.dbName,
+	City: payload01.dbCity
+	
+}]]></ee:set-payload>
+			</ee:message>
+		</ee:transform>
+		<salesforce:upsert type="Account" doc:name="Upsert" doc:id="2ff0f0a3-5058-4461-830d-7b66157a956e" config-ref="Salesforce_Config" externalIdFieldName="Id__c"/>
+	</flow>
+
+</mule>

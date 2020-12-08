@@ -9,6 +9,7 @@
 				<fixed-frequency frequency="10" timeUnit="MINUTES"/>
 			</scheduling-strategy>
 		</scheduler>
-		<logger level="INFO" doc:name="Logger" doc:id="4076746d-8786-4f0f-987d-b82f1d235e4d" message="This is Data load project"/>
+		<logger level="INFO" doc:name="Logger" doc:id="4076746d-8786-4f0f-987d-b82f1d235e4d" message="This is Data load project."/>
+		<logger level="INFO" doc:name="Logger" doc:id="4076746d-8786-4f0f-987d-b82f1d235e4d" message="Added another logger."/>
 	</flow>
 </mule>
